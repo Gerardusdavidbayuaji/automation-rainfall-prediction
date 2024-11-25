@@ -147,64 +147,73 @@
 #     print(f"Data untuk {unique_time} disimpan di {output_file}")
 
 # ===================================================================================== TESTING V4 ====================================================================
+
 import os
 import pandas as pd
 import numpy as np
 from scipy.spatial import cKDTree
-from scipy.interpolate import griddata
 import rasterio
 from rasterio.transform import from_origin
 
-# Fungsi IDW
-def idw_interpolation(x, y, z, xi, yi, power=2):
-    tree = cKDTree(np.array(list(zip(x, y))))
-    dist, idx = tree.query(np.array(list(zip(xi.ravel(), yi.ravel()))), k=10)
-    weights = 1 / dist**power
-    weights /= weights.sum(axis=1, keepdims=True)
-    zi = np.sum(z[idx] * weights, axis=1)
+# Pastikan jalur PROJ_LIB sudah benar
+os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
+
+# Fungsi untuk interpolasi IDW
+def idw_interpolasi(x, y, z, xi, yi, power=2):
+    # Membuat pohon KD untuk mencari titik terdekat
+    pohon = cKDTree(np.array(list(zip(x, y))))
+    dist, idx = pohon.query(np.array(list(zip(xi.ravel(), yi.ravel()))), k=10)
+    bobot = 1 / dist**power
+    bobot /= bobot.sum(axis=1, keepdims=True)
+    zi = np.sum(z[idx] * bobot, axis=1)
     return zi.reshape(xi.shape)
 
 # Folder input dan output
-input_dir = "repository/output/"
-output_dir = "repository/output/idw/"
-os.makedirs(output_dir, exist_ok=True)
+folder_input = "repository/output/"
+folder_output = "repository/output/idw/"
+os.makedirs(folder_output, exist_ok=True)
 
-# Baca file CSV di folder output
-csv_files = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
+# Membaca file CSV dari folder input
+file_csv = [f for f in os.listdir(folder_input) if f.endswith('.csv')]
 
-# Grid untuk interpolasi
+# Membuat grid untuk interpolasi
 grid_x, grid_y = np.meshgrid(
-    np.linspace(-180, 180, 360),  # Longitudes
-    np.linspace(-90, 90, 180)    # Latitudes
+    np.linspace(-180, 180, 3913),  # Longitude
+    np.linspace(-90, 90, 1957)    # Latitude
 )
 
-# Proses tiap file CSV
-for csv_file in csv_files:
-    csv_path = os.path.join(input_dir, csv_file)
-    df = pd.read_csv(csv_path)
+# Memproses setiap file CSV
+for file in file_csv:
+    jalur_csv = os.path.join(folder_input, file)
+    df = pd.read_csv(jalur_csv)
 
     # Ambil koordinat (x, y) dan nilai (z)
     x = df['x'].values
     y = df['y'].values
     z = df['z'].values
 
-    # Interpolasi IDW
-    grid_z = idw_interpolation(x, y, z, grid_x, grid_y)
+    # Interpolasi menggunakan IDW
+    grid_z = idw_interpolasi(x, y, z, grid_x, grid_y)
 
-    # Simpan hasil ke GeoTIFF
-    output_file = os.path.join(output_dir, f"{os.path.splitext(csv_file)[0]}.tiff")
-    transform = from_origin(-180, 90, 1.0, 1.0)  # Resolusi grid 1 derajat
+    # Simpan hasil interpolasi ke GeoTIFF
+    nama_output = os.path.join(folder_output, f"{os.path.splitext(file)[0]}.tiff")
+    transformasi = from_origin(-180, 90, 0.092, 0.092)  # Resolusi 0.092 derajat
+
+    # Gunakan CRS eksplisit jika EPSG bermasalah
+    crs = rasterio.crs.CRS.from_proj4("+proj=longlat +datum=WGS84 +no_defs")
+    
     with rasterio.open(
-        output_file,
+        nama_output,
         'w',
         driver='GTiff',
         height=grid_z.shape[0],
         width=grid_z.shape[1],
         count=1,
         dtype=grid_z.dtype,
-        crs='EPSG:4326',
-        transform=transform,
+        crs=crs,
+        transform=transformasi,
     ) as dst:
         dst.write(grid_z, 1)
 
-    print(f"Hasil interpolasi disimpan di {output_file}")
+    print(f"Hasil interpolasi disimpan di {nama_output}")
+
