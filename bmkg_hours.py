@@ -1,3 +1,5 @@
+# =============================================================== nc > csv > tiff (interpolasi) ==============================================================
+
 # import os
 # import netCDF4 as nc
 # import pandas as pd
@@ -131,59 +133,94 @@
 
 #     print(f"Hasil interpolasi disimpan di {output_tiff}")
 
-# =============================================================== shp ==============================================================
+# =============================================================== tiff > shp (reclassify) ==============================================================
+
+# import os
+# import numpy as np
+# import rasterio
+# import geopandas as gpd
+# from rasterio.features import shapes
+# from shapely.geometry import shape
+
+# os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
+
+# input_folder = "repository/output/hours/csv_to_idw"
+# output_folder = "repository/output/hours/clip/balai/base"
+# balai_path = "repository/input/data_vektor/balai.shp"
+
+# os.makedirs(output_folder, exist_ok=True)
+
+# # Melakukan reclassify
+# def reclassify_raster(raster_array, bins, values):
+#     """Reclassify array based on bins and corresponding values."""
+#     classified = np.digitize(raster_array, bins, right=False)
+#     classified = np.clip(classified, 1, len(values))
+#     reclassified_array = np.vectorize(lambda x: values[x-1] if 1 <= x <= len(values) else 0)(classified)
+#     return reclassified_array.astype('uint8')
+
+# # Aturan reclassify
+# bins = [0.02, 1.12, 2.81, 5.62, 8.43, np.inf]
+# values = [1, 2, 3, 4, 5]
+
+# # Ambil data tiff
+# for tiff_file in os.listdir(input_folder):
+#     if tiff_file.endswith(".tiff"):
+#         input_path = os.path.join(input_folder, tiff_file)
+#         output_shapefile = os.path.join(output_folder, f"{os.path.splitext(tiff_file)[0]}.shp")
+
+#         with rasterio.open(input_path) as src:
+#             raster_array = src.read(1)
+#             affine = src.transform
+#             crs = src.crs
+            
+#             # Lakukan reclassify
+#             reclassified_array = reclassify_raster(raster_array, bins, values)
+            
+#             # Konversi raster ke vektor (poligon)
+#             shapes_generator = shapes(reclassified_array, transform=affine)
+#             polygons = []
+#             classes = []
+#             for geom, value in shapes_generator:
+#                 if value != 0:  # Abaikan nilai nol
+#                     polygons.append(shape(geom))
+#                     classes.append(value)
+
+#             # Simpan ke shapefile menggunakan GeoPandas
+#             gdf = gpd.GeoDataFrame({"class": classes}, geometry=polygons, crs=crs)
+#             gdf.to_file(output_shapefile)
+#             print(f"Shapefile berhasil disimpan: {output_shapefile}")
 
 import os
-import numpy as np
-import rasterio
 import geopandas as gpd
-from rasterio.features import shapes
-from shapely.geometry import shape
 
-os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
-
-input_folder = "repository/output/hours/csv_to_idw"
-output_folder = "repository/output/hours/clip/balai/base"
+# Path direktori
+input_folder = "repository/output/hours/clip/balai/base"
+output_folder = "repository/output/hours/clip/balai/result"
 balai_path = "repository/input/data_vektor/balai.shp"
 
+# Membaca shapefile balai
+balai = gpd.read_file(balai_path)
+
+# Pastikan output folder ada
 os.makedirs(output_folder, exist_ok=True)
 
-# Melakukan reclassify
-def reclassify_raster(raster_array, bins, values):
-    """Reclassify array based on bins and corresponding values."""
-    classified = np.digitize(raster_array, bins, right=False)
-    classified = np.clip(classified, 1, len(values))
-    reclassified_array = np.vectorize(lambda x: values[x-1] if 1 <= x <= len(values) else 0)(classified)
-    return reclassified_array.astype('uint8')
+# Loop untuk memotong (crop) shapefile
+for shp_file in os.listdir(input_folder):
+    if shp_file.endswith(".shp"):
+        input_path = os.path.join(input_folder, shp_file)
+        
+        # Membaca shapefile sumber
+        source_shapefile = gpd.read_file(input_path)
+        
+        # Melakukan pemotongan menggunakan geometri balai
+        clipped = gpd.clip(source_shapefile, balai)
 
-# Aturan reclassify
-bins = [0.02, 1.12, 2.81, 5.62, 8.43, np.inf]
-values = [1, 2, 3, 4, 5]
+        # Tentukan output file path
+        output_shapefile = os.path.join(output_folder, f"{shp_file}")
+        
+        # Simpan hasil pemotongan ke shapefile
+        clipped.to_file(output_shapefile)
+        print(f"Shapefile berhasil disimpan: {output_shapefile}")
 
-# Ambil data tiff
-for tiff_file in os.listdir(input_folder):
-    if tiff_file.endswith(".tiff"):
-        input_path = os.path.join(input_folder, tiff_file)
-        output_shapefile = os.path.join(output_folder, f"{os.path.splitext(tiff_file)[0]}.shp")
-
-        with rasterio.open(input_path) as src:
-            raster_array = src.read(1)
-            affine = src.transform
-            crs = src.crs
-            
-            # Lakukan reclassify
-            reclassified_array = reclassify_raster(raster_array, bins, values)
-            
-            # Konversi raster ke vektor (poligon)
-            shapes_generator = shapes(reclassified_array, transform=affine)
-            polygons = []
-            classes = []
-            for geom, value in shapes_generator:
-                if value != 0:  # Abaikan nilai nol
-                    polygons.append(shape(geom))
-                    classes.append(value)
-
-            # Simpan ke shapefile menggunakan GeoPandas
-            gdf = gpd.GeoDataFrame({"class": classes}, geometry=polygons, crs=crs)
-            gdf.to_file(output_shapefile)
-            print(f"Shapefile berhasil disimpan: {output_shapefile}")
+# task bagaimana caranya agar properties yang balai di copy ke propertis shp baru
+# kemudian atur struktur propertiesnya
