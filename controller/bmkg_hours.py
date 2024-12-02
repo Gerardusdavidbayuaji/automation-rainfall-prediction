@@ -13,6 +13,11 @@ from shapely.geometry import shape
 import requests
 
 os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
+file_path = "repository/input/data_raster/ECMWF.0125.202410311200.PREC.nc"
+output_nc_to_csv = "repository/output/hours/nc_to_csv"
+output_csv_to_idw = "repository/output/hours/csv_to_idw"
+geoserver_endpoint = "http://admin:geoserver@127.0.0.1:8080/geoserver"
+workspace = "demo_simadu"
 
 # Fungsi untuk interpolasi IDW
 def idw_interpolasi(x, y, z, xi, yi, power=2):
@@ -35,25 +40,25 @@ def upload_to_geoserver(data_path, geoserver_endpoint, workspace, store):
         print("Tipe file tidak didukung")
         return None
     
+    # Format URL untuk upload file
+    absolute_path = os.path.abspath(data_path).replace("\\", "/")  # Pastikan jalur absolut dan format
     url = f"{geoserver_endpoint}/rest/workspaces/{workspace}/{store_type}/{store}/external.{file_type}"
     print(f"URL upload: {url}")
+    
+    # Header untuk upload GeoTIFF dan Shapefile
     headers = {"Content-type": "text/plain"}
-    response = requests.put(url, data=data_path, headers=headers)
+    response = requests.put(url, data=f"file://{absolute_path}", headers=headers)
 
-    if response.status_code == 201:
+    # Verifikasi hasil upload
+    if response.status_code in [200, 201]:
         print(f"Berhasil upload data ke GeoServer: {data_path}")
         return True
     else:
         print(f"Gagal upload data ke GeoServer: {data_path}. Status code: {response.status_code}")
+        print("Response:", response.text)
         return False
 
 # =============================================================== nc > csv > tiff (interpolasi) ==============================================================
-
-file_path = "repository/input/data_raster/ECMWF.0125.202410311200.PREC.nc"
-output_nc_to_csv = "repository/output/hours/nc_to_csv"
-output_csv_to_idw = "repository/output/hours/csv_to_idw"
-geoserver_endpoint = "http://admin:geoserver@127.0.0.1:8080/geoserver"
-workspace = "gsdb_simadu"
 
 # Buka file NetCDF
 dataset = nc.Dataset(file_path)
@@ -141,7 +146,7 @@ for unique_time in unique_times:
     grid_z = idw_interpolasi(x, y, z, grid_x, grid_y)
 
     # Simpan hasil interpolasi ke GeoTIFF
-    output_tiff = f"{output_csv_to_idw}/PREC_{time_str}.tiff"
+    output_tiff = f"{output_csv_to_idw}/PREC_{time_str}.tif"
     transformasi = from_origin(xmin, ymax, res, res)
 
     # Gunakan CRS eksplisit jika EPSG bermasalah
@@ -162,14 +167,14 @@ for unique_time in unique_times:
 
     print(f"Hasil interpolasi disimpan di {output_tiff}")
 
-    # tambahin kode untuk upload tiff yang ada di folder output_csv_to_idw ke geoserver
-    for tiff_file in os.listdir(output_csv_to_idw):
-        if tiff_file.endswith(".tiff"):
-            tiff_path = os.path.join(output_csv_to_idw, tiff_file)
-            store_name = os.path.splitext(tiff_file)[0]
-            upload_to_geoserver(tiff_path, geoserver_endpoint, workspace, store_name)
-        print("file shp telah diunggah ke Geoserver")
-
+for tiff_file in os.listdir(output_csv_to_idw):
+    if tiff_file.endswith(".tif"):
+        tiff_path = os.path.normpath(os.path.join(output_csv_to_idw, tiff_file))
+        store_name = os.path.splitext(tiff_file)[0]
+        if upload_to_geoserver(tiff_path, geoserver_endpoint, workspace, store_name):
+            print(f"File TIFF berhasil diunggah ke GeoServer: {tiff_file}")
+        else:
+            print(f"Gagal mengunggah file TIFF: {tiff_file}")
 
 # =============================================================== tiff > shp (reclassify) ==============================================================
 
@@ -193,7 +198,7 @@ values = [1, 2, 3, 4, 5]
 
 # Ambil data tiff
 for tiff_file in os.listdir(input_folder):
-    if tiff_file.endswith(".tiff"):
+    if tiff_file.endswith(".tif"):
         input_path = os.path.join(input_folder, tiff_file)
         output_shapefile = os.path.join(output_folder, f"{os.path.splitext(tiff_file)[0]}.shp")
 
@@ -305,10 +310,12 @@ for file_name in os.listdir(hours_input_folder):
 
 for shp_file in os.listdir(hours_result):
     if shp_file.endswith(".shp"):
-        shp_path = os.path.join(hours_result, shp_file)
+        shp_path = os.path.normpath(os.path.join(hours_result, shp_file))
         store_name = os.path.splitext(shp_file)[0]
-        upload_to_geoserver(shp_path, geoserver_endpoint, workspace, store_name)
-    print("file shp telah diunggah ke Geoserver")
+        if upload_to_geoserver(shp_path, geoserver_endpoint, workspace, store_name):
+            print(f"File Shapefile berhasil diunggah ke GeoServer: {shp_file}")
+        else:
+            print(f"Gagal mengunggah file Shapefile: {shp_file}")
 
 
 print("Semua file telah diproses.")
