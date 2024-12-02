@@ -146,7 +146,7 @@
 
 # input_folder = "repository/output/hours/csv_to_idw"
 # output_folder = "repository/output/hours/clip/balai/base"
-# balai_path = "repository/input/data_vektor/balai.shp"
+# balai_area = "repository/input/data_vektor/balai.shp"
 
 # os.makedirs(output_folder, exist_ok=True)
 
@@ -190,37 +190,77 @@
 #             gdf.to_file(output_shapefile)
 #             print(f"Shapefile berhasil disimpan: {output_shapefile}")
 
-import os
+# ============================================ clip balai > prec_data > struktur properties ===========================================
+
+
 import geopandas as gpd
+import os
 
-# Path direktori
-input_folder = "repository/output/hours/clip/balai/base"
-output_folder = "repository/output/hours/clip/balai/result"
-balai_path = "repository/input/data_vektor/balai.shp"
+# Path untuk input dan output
+hours_input_folder = "repository/output/hours/clip/balai/base/"
+hours_result = "repository/output/hours/clip/balai/result/"
+balai_area = "repository/input/data_vektor/balai.shp"
 
-# Membaca shapefile balai
-balai = gpd.read_file(balai_path)
+# Membaca shapefile
+prec_data = gpd.read_file(hours_input_folder)
+balai_data = gpd.read_file(balai_area)
 
-# Pastikan output folder ada
-os.makedirs(output_folder, exist_ok=True)
+# Pastikan CRS tetap dalam WGS84 (EPSG:4326)
+if prec_data.crs != "EPSG:4326":
+    prec_data = prec_data.to_crs("EPSG:4326")
+if balai_data.crs != "EPSG:4326":
+    balai_data = balai_data.to_crs("EPSG:4326")
 
-# Loop untuk memotong (crop) shapefile
-for shp_file in os.listdir(input_folder):
-    if shp_file.endswith(".shp"):
-        input_path = os.path.join(input_folder, shp_file)
-        
-        # Membaca shapefile sumber
-        source_shapefile = gpd.read_file(input_path)
-        
-        # Melakukan pemotongan menggunakan geometri balai
-        clipped = gpd.clip(source_shapefile, balai)
+# Melakukan pemotongan (clip) pada data prec_data menggunakan geometri dari balai_data
+clipped_prec_data = gpd.clip(prec_data, balai_data)
 
-        # Tentukan output file path
-        output_shapefile = os.path.join(output_folder, f"{shp_file}")
-        
-        # Simpan hasil pemotongan ke shapefile
-        clipped.to_file(output_shapefile)
-        print(f"Shapefile berhasil disimpan: {output_shapefile}")
+# Hitung jumlah kemunculan setiap nilai class (1-5) pada data prec_data yang sudah dipotong
+class_counts = clipped_prec_data['class'].value_counts().to_dict()
 
-# task bagaimana caranya agar properties yang balai di copy ke propertis shp baru
-# kemudian atur struktur propertiesnya
+# Gabungkan data spasial menggunakan nearest join
+merged_data = gpd.sjoin_nearest(clipped_prec_data, balai_data, how="left", rsuffix="_balai")
+
+# Pastikan kolom yang dibutuhkan ada di hasil join
+print("Kolom hasil join:", merged_data.columns)
+
+# Pilih kolom yang diinginkan dari data gabungan
+merged_data = merged_data[['geometry', 'kode_balai', 'balai', 'wilayah', 'class']]
+
+# Tambahkan kolom baru untuk klasifikasi dan total
+new_columns = [
+    'kelas_1', 'kelas_2', 'kelas_3', 'kelas_4', 'kelas_5',
+    'total_1', 'total_2', 'total_3', 'total_4', 'total_5'
+]
+
+for col in new_columns:
+    merged_data[col] = 0  # Inisialisasi nilai default
+
+# Grupkan data berdasarkan kode_balai
+grouped = merged_data.groupby('kode_balai')
+
+# Proses setiap grup
+for kode_balai, group in grouped:
+    # Ambil array class dari grup saat ini
+    class_array = group['class'].tolist()
+
+    # Hitung jumlah kemunculan setiap nilai class (1-5) di dalam grup
+    count_class = {i: class_array.count(i) for i in range(1, 6)}
+
+    # Update nilai kelas untuk grup tersebut
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'kelas_1'] = count_class.get(1, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'kelas_2'] = count_class.get(2, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'kelas_3'] = count_class.get(3, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'kelas_4'] = count_class.get(4, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'kelas_5'] = count_class.get(5, 0)
+
+    # Menggunakan nilai total yang dihitung sebelumnya pada seluruh data untuk mengisi 'total_1' - 'total_5'
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'total_1'] = class_counts.get(1, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'total_2'] = class_counts.get(2, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'total_3'] = class_counts.get(3, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'total_4'] = class_counts.get(4, 0)
+    merged_data.loc[merged_data['kode_balai'] == kode_balai, 'total_5'] = class_counts.get(5, 0)
+
+# Simpan hasil ke file shapefile baru
+merged_data.to_file(hours_result)
+
+print("Proses selesai. File telah disimpan di:", hours_result)
