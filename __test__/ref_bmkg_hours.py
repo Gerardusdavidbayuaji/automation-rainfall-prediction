@@ -1,24 +1,18 @@
-from rasterio.transform import from_origin
-from datetime import datetime as dt
-from scipy.spatial import cKDTree
-from dotenv import load_dotenv
-import geopandas as gpd
+import os
 import netCDF4 as nc
 import pandas as pd
 import numpy as np
+import cftime
+from datetime import datetime as dt
+from scipy.spatial import cKDTree
 import rasterio
+from rasterio.transform import from_origin
+import geopandas as gpd
 import requests
 import datetime
 import ftplib
-import cftime
-import os
 
-load_dotenv()
 os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
-
-geoserver_endpoint = os.getenv("GEOSERVER_ENDPOINT")
-workspace = os.getenv("WORKSPACE")
-
 output_extracted_point_island_folder = "repository/output/hours/result/pulau"
 output_extracted_point_balai_folder = "repository/output/hours/result/balai"
 boundry_island_data = "repository/input/data_vektor/sampel_pch_pulaui.shp"
@@ -26,12 +20,15 @@ boundry_balai_data = "repository/input/data_vektor/sampel_pch_balai.shp"
 download_precipitation_path_raster = "repository/input/data_raster"
 output_csv_to_idw = "repository/output/hours/csv_to_idw"
 output_nc_to_csv = "repository/output/hours/nc_to_csv"
+geoserver_endpoint = "http://admin:geoserver@127.0.0.1:8080/geoserver"
+workspace = "demo_simadu"
 
 # konfigurasi ftp
-ftp_host = os.getenv("HOST")
-ftp_user = os.getenv("USER")
-ftp_password = os.getenv("PASSWORD")
+ftp_host = "publik.bmkg.go.id"
+ftp_user = "pupr"
+ftp_password = "modelecmwf2024"
 cycle = "12"
+download_precipitation_path_raster = "repository/input/data_raster"
 os.makedirs(download_precipitation_path_raster, exist_ok=True)
 
 # FTP functions
@@ -43,7 +40,6 @@ def connect_ftp():
 
 def download_file_from_ftp(ftp, filename):
     file_list = ftp.nlst()
-    print(file_list)
     if filename in file_list:
         local_file_path = os.path.join(download_precipitation_path_raster, filename)
         if not os.path.exists(local_file_path):
@@ -166,7 +162,7 @@ def upload_to_geoserver(data_path, store_name):
     
     absolute_path = os.path.abspath(data_path).replace("\\", "/")
     url = f"{geoserver_endpoint}/rest/workspaces/{workspace}/{store_type}/{store_name}/external.{file_type}"
-    # print("url data geotiff:", url)
+    print("url data geotiff:", url)
 
     headers = {"Content-type": "text/plain"}
     response = requests.put(url, data=f"file://{absolute_path}", headers=headers)
@@ -271,23 +267,26 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point['grid_kg'] = extract_point['value'].apply(classify_grid_kg)
 
     # Tambahkan kolom kelas
-    kelas_columns = ['kelas_kl_1', 'kelas_kl_2', 'kelas_kl_3', 'kelas_kl_4', 'kelas_kl_5']
+    kelas_columns = ['kelas_1', 'kelas_2', 'kelas_3', 'kelas_4', 'kelas_5']
     for col in kelas_columns:
         extract_point[col] = 0
 
     # Perhitungan `kelas_1` hingga `kelas_5` berdasarkan `kode_kk`
     grouped = extract_point.groupby('kode_kk')
 
+    # Hapus duplikasi dan hanya ambil satu baris per `kode_kk`
+    extract_point = extract_point.drop_duplicates(subset='kode_kk', keep='first')
+
     for kode_pulau, group in grouped:
         # Hitung jumlah kemunculan setiap nilai grid_kl dalam grup
         grid_kl_counts = group['grid_kl'].value_counts().to_dict()
 
         # Update nilai kelas berdasarkan grid_kl
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_1'] = grid_kl_counts.get(1, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_2'] = grid_kl_counts.get(2, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_3'] = grid_kl_counts.get(3, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_4'] = grid_kl_counts.get(4, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_5'] = grid_kl_counts.get(5, 0)
+        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_1'] = grid_kl_counts.get(1, 0)
+        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_2'] = grid_kl_counts.get(2, 0)
+        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_3'] = grid_kl_counts.get(3, 0)
+        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_4'] = grid_kl_counts.get(4, 0)
+        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_5'] = grid_kl_counts.get(5, 0)
 
     # Hitung total untuk setiap kategori di grid_kl
     grid_kl_counts_total = extract_point['grid_kl'].value_counts().to_dict()
@@ -297,24 +296,6 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point['total_kl_4'] = grid_kl_counts_total.get(4, 0)
     extract_point['total_kl_5'] = grid_kl_counts_total.get(5, 0)
 
-    # tambahkan kolom kelas kesiapsiagaan
-    kelas_columns_kesiapsiagaan = ['kelas_kg_1', 'kelas_kg_2', 'kelas_kg_3', 'kelas_kg_4']
-    for col_kesiapsiagaan in kelas_columns_kesiapsiagaan:
-        extract_point[col_kesiapsiagaan] = 0
-
-    # perhitungan kelas_kg_1 sampai kelas_kg_4
-    grouped_kesiapsiagaan = extract_point.groupby('kode_kk')
-
-    for kode_pulau, group_kesiapsiagaan in grouped_kesiapsiagaan:
-        # Hitung jumlah kemunculan setiap nilai grid_kl dalam grup
-        grid_kg_counts = group_kesiapsiagaan['grid_kg'].value_counts().to_dict()
-
-        # Update nilai kelas berdasarkan grid_kl
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_1'] = grid_kg_counts.get(1, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_2'] = grid_kg_counts.get(2, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_3'] = grid_kg_counts.get(3, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_4'] = grid_kg_counts.get(4, 0)
-
     # Hitung total untuk setiap kategori di grid_kg
     grid_kg_counts_total = extract_point['grid_kg'].value_counts().to_dict()
     extract_point['total_kg_1'] = grid_kg_counts_total.get(1, 0)
@@ -322,19 +303,16 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point['total_kg_3'] = grid_kg_counts_total.get(3, 0)
     extract_point['total_kg_4'] = grid_kg_counts_total.get(4, 0)
 
-    # Hapus duplikasi dan hanya ambil satu baris per `kode_kk` berdasarkan nilai tertinggi pada kolom `value`
-    extract_point = extract_point.loc[extract_point.groupby('kode_kk')['value'].idxmax()]
-
     # Simpan ke shapefile
     output_file = os.path.join(output_folder, f"{prefix}_{os.path.basename(raster_file).replace('.tif', '.shp')}")
     extract_point.to_file(output_file, driver="ESRI Shapefile")
-    # print(f"Berhasil ekstrak data raster {output_file}")
+    print(f"Berhasil ekstrak data raster {output_file}")
 
     # Ambil nama file tanpa ekstensi .shp untuk digunakan sebagai store
     store_name = os.path.splitext(os.path.basename(output_file))[0]
-    # print("store name", store_name)
 
     # Upload shapefile ke GeoServer
+    print("store name", store_name)
     if upload_to_geoserver(output_file, store_name):
         print(f"File TIFF berhasil diunggah ke GeoServer: {output_file}")
     else:
