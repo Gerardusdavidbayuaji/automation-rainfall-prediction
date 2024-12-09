@@ -43,7 +43,6 @@ def connect_ftp():
 
 def download_file_from_ftp(ftp, filename):
     file_list = ftp.nlst()
-    print(file_list)
     if filename in file_list:
         local_file_path = os.path.join(download_precipitation_path_raster, filename)
         if not os.path.exists(local_file_path):
@@ -78,7 +77,7 @@ if local_file_path is None:
     print("File tidak tersedia untuk didownload")
     exit()
 
-# Function to convert time from NetCDF
+# Konversi ke UTC
 def convert_time(times, time_units, time_calendar):
     time_converted = nc.num2date(times, units=time_units, calendar=time_calendar)
     time_converted_utc = []
@@ -91,7 +90,7 @@ def convert_time(times, time_units, time_calendar):
         time_converted_utc.append(time_value)
     return pd.to_datetime(time_converted_utc).tz_localize('UTC')
 
-# Process NetCDF and aggregate by 3 hours
+# Akumulasi curah hujan per 3 jam
 def process_netcdf(local_file_path):
     dataset = nc.Dataset(local_file_path)
 
@@ -125,7 +124,7 @@ def process_netcdf(local_file_path):
 
     return df_accumulated
 
-# Save processed data to CSV
+# Ubah data nc menjadi csv, untuk dilanjutkan interpolasi IDW 
 def save_to_csv(df_accumulated, output_nc_to_csv):
     unique_times = df_accumulated['time'].unique()
 
@@ -142,7 +141,7 @@ def save_to_csv(df_accumulated, output_nc_to_csv):
         
     return unique_times
 
-# IDW interpolation function
+# fungsi interpolasi IDW
 def idw_interpolation(x, y, z, xi, yi, power=2):
     tree = cKDTree(np.array(list(zip(x, y))))
     dist, idx = tree.query(np.array(list(zip(xi.ravel(), yi.ravel()))), k=10)
@@ -151,7 +150,7 @@ def idw_interpolation(x, y, z, xi, yi, power=2):
     zi = np.sum(z[idx] * weights, axis=1)
     return zi.reshape(xi.shape)
 
-# Upload data to GeoServer
+# Upload data ke Geoserver
 def upload_to_geoserver(data_path, store_name):
     file_extension = os.path.splitext(data_path)[1].lower()
     if file_extension == ".shp":
@@ -166,7 +165,7 @@ def upload_to_geoserver(data_path, store_name):
     
     absolute_path = os.path.abspath(data_path).replace("\\", "/")
     url = f"{geoserver_endpoint}/rest/workspaces/{workspace}/{store_type}/{store_name}/external.{file_type}"
-    # print("url data geotiff:", url)
+    print("url data geotiff:", url)
 
     headers = {"Content-type": "text/plain"}
     response = requests.put(url, data=f"file://{absolute_path}", headers=headers)
@@ -178,7 +177,7 @@ def upload_to_geoserver(data_path, store_name):
         print(f"Gagal upload {data_path} ke geoserver. Status code: {response.status_code}")
         return False
 
-# Interpolate and save to GeoTIFF
+# Melakukan interpolasi, kemudian simpan hasil dengan format .tif
 def interpolate_and_save_to_tiff(df_accumulated, output_csv_to_idw, geoserver_endpoint, workspace):
     unique_times = df_accumulated['time'].unique()
 
@@ -188,16 +187,13 @@ def interpolate_and_save_to_tiff(df_accumulated, output_csv_to_idw, geoserver_en
         y = filtered_df['y'].values
         z = filtered_df['z'].values
 
-        # Define grid for interpolation
         xmin, xmax = x.min(), x.max()
         ymin, ymax = y.min(), y.max()
-        res = 0.092  # Grid resolution in degrees
+        res = 0.092
         grid_x, grid_y = np.meshgrid(np.arange(xmin, xmax + res, res), np.arange(ymin, ymax + res, res))
 
-        # IDW Interpolation
         grid_z = idw_interpolation(x, y, z, grid_x, grid_y)
 
-        # Save to GeoTIFF
         time_str = unique_time.strftime('%m%d%Y_%H%M')
         output_tiff = f"{output_csv_to_idw}/pch_hour_{time_str}.tif"
         transformasi = from_origin(xmin, ymax, res, res)
@@ -213,21 +209,20 @@ def interpolate_and_save_to_tiff(df_accumulated, output_csv_to_idw, geoserver_en
         store_name = os.path.splitext(os.path.basename(output_tiff))[0]
         print("store name", store_name)
         if upload_to_geoserver(output_tiff, store_name):
-            print(f"File TIFF berhasil diunggah ke GeoServer: {output_tiff}")
+            print(f"File .tif berhasil diunggah ke GeoServer: {output_tiff}")
         else:
-            print(f"Gagal mengunggah file TIFF: {output_tiff}")
+            print(f"Gagal mengunggah file .tif: {output_tiff}")
 
+# melakukan ekstrak data raster berdasarkan titik sampel
 def process_extraction(boundary_data, raster_file, output_folder, prefix):
-    # Baca shapefile
     extract_point = gpd.read_file(boundary_data)
     print(f"Memproses file: {boundary_data} dengan raster: {raster_file}")
 
-    # Buka file raster
     with rasterio.open(raster_file) as src:
         raster_data = src.read(1)
         raster_transform = src.transform
 
-    # Ekstraksi nilai raster berdasarkan titik
+    # Ekstrak nilai raster berdasarkan titik
     extracted_values = []
     for _, row in extract_point.iterrows():
         x, y = row.geometry.x, row.geometry.y
@@ -238,7 +233,8 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
 
     extract_point['value'] = extracted_values
 
-    # Klasifikasi curah hujan
+    # Klasifikasi curah hujan dan kesiapsiagaan bencana
+    # classify_grid_kl adalah klasifikasi curah hujan
     def classify_grid_kl(val):
         if 0.00 <= val < 1.12:
             return 1
@@ -252,8 +248,8 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
             return 5
         else:
             return 1
-
-    # Klasifikasi kesiapsiagaan bencana
+        
+    # classify_grid_kg adalah klasifikasi kesiapsiagaan
     def classify_grid_kg(val):
         if 0.00 <= val < 2.81:
             return 1
@@ -266,30 +262,16 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
         else:
             return 1
 
-    # Tambahkan kolom klasifikasi
+    # Tambahkan klasifikasi ke dataframe
+    # grid_kl adalah nilai yang diperoleh dari ekstrak data raster (value) dengan titik menggunakan klasifikasi curah hujan
+    # grid_kg adalah nilai yang diperoleh dari ekstrak data raster (value) dengan titik menggunakan klasifikasi curah hujan
     extract_point['grid_kl'] = extract_point['value'].apply(classify_grid_kl)
     extract_point['grid_kg'] = extract_point['value'].apply(classify_grid_kg)
 
-    # Tambahkan kolom kelas
-    kelas_columns = ['kelas_kl_1', 'kelas_kl_2', 'kelas_kl_3', 'kelas_kl_4', 'kelas_kl_5']
-    for col in kelas_columns:
-        extract_point[col] = 0
-
-    # Perhitungan `kelas_1` hingga `kelas_5` berdasarkan `kode_kk`
-    grouped = extract_point.groupby('kode_kk')
-
-    for kode_pulau, group in grouped:
-        # Hitung jumlah kemunculan setiap nilai grid_kl dalam grup
-        grid_kl_counts = group['grid_kl'].value_counts().to_dict()
-
-        # Update nilai kelas berdasarkan grid_kl
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_1'] = grid_kl_counts.get(1, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_2'] = grid_kl_counts.get(2, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_3'] = grid_kl_counts.get(3, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_4'] = grid_kl_counts.get(4, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kl_5'] = grid_kl_counts.get(5, 0)
-
-    # Hitung total untuk setiap kategori di grid_kl
+    # Hitung total_kl_* dan total_kg_* untuk setiap kategori
+    # Kolom total_kl_* digunakan untuk mengisi nilai pada UI klasifikasi hujan
+    # Kolom total_kg_* digunakan untuk mengisi nilai pada UI kesiapsiagaan
+    # Operasi grid_kl_counts_total berfungsi untuk mengisi kolom total_kl_1 sampai total_kl_5 berdasarkan nilai jumlah kelas 
     grid_kl_counts_total = extract_point['grid_kl'].value_counts().to_dict()
     extract_point['total_kl_1'] = grid_kl_counts_total.get(1, 0)
     extract_point['total_kl_2'] = grid_kl_counts_total.get(2, 0)
@@ -297,50 +279,81 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point['total_kl_4'] = grid_kl_counts_total.get(4, 0)
     extract_point['total_kl_5'] = grid_kl_counts_total.get(5, 0)
 
-    # tambahkan kolom kelas kesiapsiagaan
-    kelas_columns_kesiapsiagaan = ['kelas_kg_1', 'kelas_kg_2', 'kelas_kg_3', 'kelas_kg_4']
-    for col_kesiapsiagaan in kelas_columns_kesiapsiagaan:
-        extract_point[col_kesiapsiagaan] = 0
-
-    # perhitungan kelas_kg_1 sampai kelas_kg_4
-    grouped_kesiapsiagaan = extract_point.groupby('kode_kk')
-
-    for kode_pulau, group_kesiapsiagaan in grouped_kesiapsiagaan:
-        # Hitung jumlah kemunculan setiap nilai grid_kl dalam grup
-        grid_kg_counts = group_kesiapsiagaan['grid_kg'].value_counts().to_dict()
-
-        # Update nilai kelas berdasarkan grid_kl
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_1'] = grid_kg_counts.get(1, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_2'] = grid_kg_counts.get(2, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_3'] = grid_kg_counts.get(3, 0)
-        extract_point.loc[extract_point['kode_kk'] == kode_pulau, 'kelas_kg_4'] = grid_kg_counts.get(4, 0)
-
-    # Hitung total untuk setiap kategori di grid_kg
+    # Operasi grid_kg_counts_total berfungsi untuk mengisi kolom total_kg_1 sampai total_kg_4 berdasarkan nilai jumlah kelas 
     grid_kg_counts_total = extract_point['grid_kg'].value_counts().to_dict()
     extract_point['total_kg_1'] = grid_kg_counts_total.get(1, 0)
     extract_point['total_kg_2'] = grid_kg_counts_total.get(2, 0)
     extract_point['total_kg_3'] = grid_kg_counts_total.get(3, 0)
     extract_point['total_kg_4'] = grid_kg_counts_total.get(4, 0)
 
-    # Hapus duplikasi dan hanya ambil satu baris per `kode_kk` berdasarkan nilai tertinggi pada kolom `value`
-    extract_point = extract_point.loc[extract_point.groupby('kode_kk')['value'].idxmax()]
+    # Output Pulau
+    # kelas_kl_* diperoleh berdasarkan kumpulan grid_kl per kode_pulau
+    if 'kode_pulau' in extract_point.columns:
+        grouped_pulau = extract_point.groupby('kode_pulau')
+        for kode_pulau, group in grouped_pulau:
+            grid_kl_counts = group['grid_kl'].value_counts().to_dict()
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_1'] = grid_kl_counts.get(1, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_2'] = grid_kl_counts.get(2, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_3'] = grid_kl_counts.get(3, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_4'] = grid_kl_counts.get(4, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_5'] = grid_kl_counts.get(5, 0)
+
+    # kelas_kg_* diperoleh berdasarkan kumpulan grid_kg per kode_pulau
+    if 'kode_pulau' in extract_point.columns:
+        grouped_pulau = extract_point.groupby('kode_pulau')
+        for kode_pulau, group in grouped_pulau:
+            grid_kl_counts = group['grid_kg'].value_counts().to_dict()
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_1'] = grid_kl_counts.get(1, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_2'] = grid_kl_counts.get(2, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_3'] = grid_kl_counts.get(3, 0)
+            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_4'] = grid_kl_counts.get(4, 0)
+
+        # tampilkan nilai tertinggi saja berdasarkan value, karena acuannya menggunakan nilai tertinggi pada masing-masing pulau
+        extract_point = extract_point.loc[extract_point.groupby('kode_pulau')['value'].idxmax()]
+        # Hapus kolom grid_kl dan grid_kg, karena sudah tidak digunakan lagi untuk pedoman perhitungan
+        extract_point = extract_point.drop(columns=['grid_kl', 'grid_kg'])
+
+    # Output Balai
+    # kelas_kl_* diperoleh berdasarkan kumpulan grid_kl per kode_balai
+    if 'kode_balai' in extract_point.columns:
+        grouped_balai = extract_point.groupby('kode_balai')
+        for kode_balai, group in grouped_balai:
+            grid_kg_counts = group['grid_kl'].value_counts().to_dict()
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_1'] = grid_kg_counts.get(1, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_2'] = grid_kg_counts.get(2, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_3'] = grid_kg_counts.get(3, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_4'] = grid_kg_counts.get(4, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_5'] = grid_kg_counts.get(4, 0)
+
+    # kelas_kg_* diperoleh berdasarkan kumpulan grid_kg per kode_balai
+    if 'kode_balai' in extract_point.columns:
+        grouped_balai = extract_point.groupby('kode_balai')
+        for kode_balai, group in grouped_balai:
+            grid_kg_counts = group['grid_kg'].value_counts().to_dict()
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kg_1'] = grid_kg_counts.get(1, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kg_2'] = grid_kg_counts.get(2, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kg_3'] = grid_kg_counts.get(3, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kg_4'] = grid_kg_counts.get(4, 0)
+
+        # Tampilkan nilai tertinggi saja berdasarkan value, karena acuannya menggunakan nilai tertinggi pada masing-masing balai
+        extract_point = extract_point.loc[extract_point.groupby('kode_balai')['value'].idxmax()]
+        # Hapus kolom grid_kl dan grid_kg, karena sudah tidak digunakan lagi untuk pedoman perhitungan
+        extract_point = extract_point.drop(columns=['grid_kl', 'grid_kg'])
 
     # Simpan ke shapefile
     output_file = os.path.join(output_folder, f"{prefix}_{os.path.basename(raster_file).replace('.tif', '.shp')}")
     extract_point.to_file(output_file, driver="ESRI Shapefile")
-    # print(f"Berhasil ekstrak data raster {output_file}")
+    print(f"Berhasil ekstrak data raster {output_file}")
 
-    # Ambil nama file tanpa ekstensi .shp untuk digunakan sebagai store
+    # Upload ke GeoServer
     store_name = os.path.splitext(os.path.basename(output_file))[0]
-    # print("store name", store_name)
-
-    # Upload shapefile ke GeoServer
     if upload_to_geoserver(output_file, store_name):
-        print(f"File TIFF berhasil diunggah ke GeoServer: {output_file}")
+        print(f"File berhasil diunggah ke GeoServer: {output_file}")
     else:
-        print(f"Gagal mengunggah file TIFF: {output_file}")
+        print(f"Gagal mengunggah file: {output_file}")
 
-# Looping melalui semua file TIFF di folder
+
+# Looping data .tif pada folder
 for tif_file in os.listdir(output_csv_to_idw):
     if tif_file.endswith('.tif'):
         raster_path = os.path.join(output_csv_to_idw, tif_file)
@@ -391,3 +404,4 @@ process_netcdf_and_interpolate_with_extraction(
     output_extracted_point_island_folder, 
     output_extracted_point_balai_folder
 )
+
