@@ -19,13 +19,13 @@ os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
 geoserver_endpoint = os.getenv("GEOSERVER_ENDPOINT")
 workspace = os.getenv("WORKSPACE")
 
-output_extracted_point_island_folder = "repository/output/daily/result/pulau"
-output_extracted_point_balai_folder = "repository/output/daily/result/balai"
+output_extracted_point_island_folder = "repository/output/pch/daily/result/pulau"
+output_extracted_point_balai_folder = "repository/output/pch/daily/result/balai"
 boundry_island_data = "repository/input/data_vektor/sampel_pch_pulaui.shp"
 boundry_balai_data = "repository/input/data_vektor/sampel_pch_balai.shp"
-download_precipitation_path_raster = "repository/input/data_raster"
-output_csv_to_idw = "repository/output/daily/csv_to_idw"
-output_nc_to_csv = "repository/output/daily/nc_to_csv"
+download_precipitation_path_raster = "repository/input/data_raster/pch"
+output_csv_to_idw = "repository/output/pch/daily/csv_to_idw"
+output_nc_to_csv = "repository/output/pch/daily/nc_to_csv"
 
 # konfigurasi ftp
 ftp_host = os.getenv("HOST")
