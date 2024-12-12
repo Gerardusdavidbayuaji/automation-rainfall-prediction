@@ -19,7 +19,7 @@ os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
 geoserver_endpoint = os.getenv("GEOSERVER_ENDPOINT")
 workspace = os.getenv("WORKSPACE")
 
-output_extracted_point_island_folder = "repository/output/pch/hours/result/balai"
+output_extracted_point_island_folder = "repository/output/pch/hours/result/pulau"
 output_extracted_point_balai_folder = "repository/output/hours/result/balai"
 boundry_island_data = "repository/input/data_vektor/sampel_pch_pulaui.shp"
 boundry_balai_data = "repository/input/data_vektor/sampel_pch_balai.shp"
