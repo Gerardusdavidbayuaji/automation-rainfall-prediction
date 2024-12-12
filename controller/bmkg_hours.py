@@ -23,7 +23,7 @@ output_extracted_point_island_folder = "repository/output/pch/hours/result/pulau
 output_extracted_point_balai_folder = "repository/output/hours/result/balai"
 boundry_island_data = "repository/input/data_vektor/sampel_pch_pulaui.shp"
 boundry_balai_data = "repository/input/data_vektor/sampel_pch_balai.shp"
-download_precipitation_path_raster = "repository/input/data_raster/pch"
+download_precipitation_path_raster = "repository/input/data_raster"
 output_csv_to_idw = "repository/output/pch/hours/csv_to_idw"
 output_nc_to_csv = "repository/output/pch/hours/nc_to_csv"
 
