@@ -19,13 +19,13 @@ os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
 geoserver_endpoint = os.getenv("GEOSERVER_ENDPOINT")
 workspace = os.getenv("WORKSPACE")
 
-output_extracted_point_island_folder = "repository/output/pch/daily/result/pulau"
-output_extracted_point_balai_folder = "repository/output/pch/daily/result/balai"
-boundry_island_data = "repository/input/data_vektor/sampel_pch_pulaui.shp"
-boundry_balai_data = "repository/input/data_vektor/sampel_pch_balai.shp"
-download_precipitation_path_raster = "repository/input/data_raster/pch"
-output_csv_to_idw = "repository/output/pch/daily/csv_to_idw"
-output_nc_to_csv = "repository/output/pch/daily/nc_to_csv"
+output_extracted_point_island_folder = "repository/output/daily/result/pulau"
+output_extracted_point_balai_folder = "repository/output/daily/result/balai"
+boundry_island_data = "repository/input/data_vektor/pch_pulau.shp"
+boundry_balai_data = "repository/input/data_vektor/pch_balai.shp"
+download_precipitation_path_raster = "repository/input/data_raster"
+output_csv_to_idw = "repository/output/daily/csv_to_idw"
+output_nc_to_csv = "repository/output/daily/nc_to_csv"
 
 # konfigurasi ftp
 ftp_host = os.getenv("HOST")
@@ -123,6 +123,12 @@ def process_netcdf(local_file_path):
             'time': 'first',
             'z': 'sum'        
         })
+    
+    # cek tanggal minimal dan maksimal data .nc yang sedang diproses
+    min_date = df_daily['time'].min()
+    max_date = df_daily['time'].max()
+
+    print(f"Data range: {min_date} to {max_date}")
 
     return df_daily
 
@@ -143,7 +149,7 @@ def save_to_csv(df_daily, output_nc_to_csv):
         
     return unique_times
 
-# fungsi interpolasi IDW
+# Interpolasi IDW
 def idw_interpolation(x, y, z, xi, yi, power=2):
     tree = cKDTree(np.array(list(zip(x, y))))
     dist, idx = tree.query(np.array(list(zip(xi.ravel(), yi.ravel()))), k=10)
@@ -270,10 +276,10 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point['grid_kl'] = extract_point['value'].apply(classify_grid_kl)
     extract_point['grid_kg'] = extract_point['value'].apply(classify_grid_kg)
 
-    # Hitung total_kl_* dan total_kg_* untuk setiap kategori
+    # Hitung total_kl_* dan total_kg_* untuk setiap kategori per wilayah
     # Kolom total_kl_* digunakan untuk mengisi nilai pada UI klasifikasi hujan
     # Kolom total_kg_* digunakan untuk mengisi nilai pada UI kesiapsiagaan
-    # Operasi grid_kl_counts_total berfungsi untuk mengisi kolom total_kl_1 sampai total_kl_5 berdasarkan nilai jumlah kelas 
+    # Operasi grid_kl_counts_total berfungsi untuk mengisi kolom total_kl_1 sampai total_kl_5 berdasarkan nilai jumlah kelas
     grid_kl_counts_total = extract_point['grid_kl'].value_counts().to_dict()
     extract_point['total_kl_1'] = grid_kl_counts_total.get(1, 0)
     extract_point['total_kl_2'] = grid_kl_counts_total.get(2, 0)
@@ -407,4 +413,3 @@ process_netcdf_and_interpolate_with_extraction(
     output_extracted_point_island_folder, 
     output_extracted_point_balai_folder
 )
-
