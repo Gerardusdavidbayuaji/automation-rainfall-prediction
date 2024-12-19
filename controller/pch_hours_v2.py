@@ -42,17 +42,20 @@ def connect_ftp():
     return ftp
 
 def download_file_from_ftp(ftp, filename):
-    file_list = ftp.nlst()
-    if filename in file_list:
-        local_file_path = os.path.join(download_precipitation_path_raster, filename)
-        if not os.path.exists(local_file_path):
-            with open(local_file_path, "wb") as local_file:
-                ftp.retrbinary(f"RETR {filename}", local_file.write)
-            print(f"Berhasil download file {filename}")
-        else:
-            print(f"File {filename} sudah tersedia")
-        return local_file_path
-    return None
+    try:
+        file_list = ftp.nlst()
+        if filename in file_list:
+            local_file_path = os.path.join(download_precipitation_path_raster, filename)
+            if not os.path.exists(local_file_path):
+                with open(local_file_path, "wb") as local_file:
+                    ftp.retrbinary(f"RETR {filename}", local_file.write)
+                print(f"Berhasil download file {filename}")
+            else:
+                print(f"File {filename} sudah tersedia")
+            return local_file_path
+    except Exception:
+        print("File rusak, tidak ada yang bisa dilakukan...")
+        return None
 
 def download_latest_file_from_ftp(ftp):
     file_list = ftp.nlst()
@@ -62,7 +65,7 @@ def download_latest_file_from_ftp(ftp):
     return None
 
 # Download file .nc
-today = datetime.date.today() - datetime.timedelta(days=1)
+today = datetime.date.today() - datetime.timedelta(days=3)
 filename = f"ECMWF.0125.{today.strftime('%Y%m%d')}{cycle}00.PREC.nc"
 print("Sedang mengunduh:", filename)
 
