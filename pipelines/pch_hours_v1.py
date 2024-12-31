@@ -1,17 +1,17 @@
-from rasterio.transform import from_origin
-from datetime import datetime as dt
-from scipy.spatial import cKDTree
-from dotenv import load_dotenv
-import geopandas as gpd
-import netCDF4 as nc
-import pandas as pd
-import numpy as np
-import rasterio
-import requests
-import datetime
-import ftplib
-import cftime
 import os
+import cftime
+import ftplib
+import datetime
+import requests
+import rasterio
+import numpy as np
+import pandas as pd
+import netCDF4 as nc
+import geopandas as gpd
+from dotenv import load_dotenv
+from scipy.spatial import cKDTree
+from datetime import datetime as dt
+from rasterio.transform import from_origin
 
 load_dotenv()
 os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
@@ -19,13 +19,13 @@ os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
 geoserver_endpoint = os.getenv("GEOSERVER_ENDPOINT")
 workspace = os.getenv("WORKSPACE")
 
-output_extracted_point_island_folder = "repository/output/hours/result/pulau"
+output_extracted_point_island_folder = "repository/output/pch/hours/result/pulau"
 output_extracted_point_balai_folder = "repository/output/hours/result/balai"
-boundry_island_data = "repository/input/data_vektor/pch_pulau.shp"
-boundry_balai_data = "repository/input/data_vektor/pch_balai.shp"
+boundry_island_data = "repository/input/data_vektor/sampel_pch_pulaui.shp"
+boundry_balai_data = "repository/input/data_vektor/sampel_pch_balai.shp"
 download_precipitation_path_raster = "repository/input/data_raster"
-output_csv_to_idw = "repository/output/hours/csv_to_idw"
-output_nc_to_csv = "repository/output/hours/nc_to_csv"
+output_csv_to_idw = "repository/output/pch/hours/csv_to_idw"
+output_nc_to_csv = "repository/output/pch/hours/nc_to_csv"
 
 # konfigurasi ftp
 ftp_host = os.getenv("HOST")
@@ -42,20 +42,17 @@ def connect_ftp():
     return ftp
 
 def download_file_from_ftp(ftp, filename):
-    try:
-        file_list = ftp.nlst()
-        if filename in file_list:
-            local_file_path = os.path.join(download_precipitation_path_raster, filename)
-            if not os.path.exists(local_file_path):
-                with open(local_file_path, "wb") as local_file:
-                    ftp.retrbinary(f"RETR {filename}", local_file.write)
-                print(f"Berhasil download file {filename}")
-            else:
-                print(f"File {filename} sudah tersedia")
-            return local_file_path
-    except Exception:
-        print("File rusak, tidak ada yang bisa dilakukan...")
-        return None
+    file_list = ftp.nlst()
+    if filename in file_list:
+        local_file_path = os.path.join(download_precipitation_path_raster, filename)
+        if not os.path.exists(local_file_path):
+            with open(local_file_path, "wb") as local_file:
+                ftp.retrbinary(f"RETR {filename}", local_file.write)
+            print(f"Berhasil download file {filename}")
+        else:
+            print(f"File {filename} sudah tersedia")
+        return local_file_path
+    return None
 
 def download_latest_file_from_ftp(ftp):
     file_list = ftp.nlst()
@@ -65,7 +62,7 @@ def download_latest_file_from_ftp(ftp):
     return None
 
 # Download file .nc
-today = datetime.date.today() - datetime.timedelta(days=3)
+today = datetime.date.today() - datetime.timedelta(days=1)
 filename = f"ECMWF.0125.{today.strftime('%Y%m%d')}{cycle}00.PREC.nc"
 print("Sedang mengunduh:", filename)
 
@@ -271,29 +268,23 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point['grid_kl'] = extract_point['value'].apply(classify_grid_kl)
     extract_point['grid_kg'] = extract_point['value'].apply(classify_grid_kg)
 
-    # Hitung total_kl_* dan total_kg_* untuk setiap kategori per wilayah
+    # Hitung total_kl_* dan total_kg_* untuk setiap kategori
     # Kolom total_kl_* digunakan untuk mengisi nilai pada UI klasifikasi hujan
     # Kolom total_kg_* digunakan untuk mengisi nilai pada UI kesiapsiagaan
-    # Operasi grid_kl_counts_total berfungsi untuk mengisi kolom total_kl_1 sampai total_kl_5 berdasarkan nilai jumlah kelas
-    if 'wilayah' in extract_point.columns:
-        grouped_pulau = extract_point.groupby('wilayah')
-        for wilayah, group in grouped_pulau:
-            grid_kl_counts = group['grid_kl'].value_counts().to_dict()
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kl_1'] = grid_kl_counts.get(1, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kl_2'] = grid_kl_counts.get(2, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kl_3'] = grid_kl_counts.get(3, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kl_4'] = grid_kl_counts.get(4, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kl_5'] = grid_kl_counts.get(5, 0)
+    # Operasi grid_kl_counts_total berfungsi untuk mengisi kolom total_kl_1 sampai total_kl_5 berdasarkan nilai jumlah kelas 
+    grid_kl_counts_total = extract_point['grid_kl'].value_counts().to_dict()
+    extract_point['total_kl_1'] = grid_kl_counts_total.get(1, 0)
+    extract_point['total_kl_2'] = grid_kl_counts_total.get(2, 0)
+    extract_point['total_kl_3'] = grid_kl_counts_total.get(3, 0)
+    extract_point['total_kl_4'] = grid_kl_counts_total.get(4, 0)
+    extract_point['total_kl_5'] = grid_kl_counts_total.get(5, 0)
 
-    # kelas_kg_* diperoleh berdasarkan kumpulan grid_kg per wilayah
-    if 'wilayah' in extract_point.columns:
-        grouped_pulau = extract_point.groupby('wilayah')
-        for wilayah, group in grouped_pulau:
-            grid_kl_counts = group['grid_kg'].value_counts().to_dict()
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kg_1'] = grid_kl_counts.get(1, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kg_2'] = grid_kl_counts.get(2, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kg_3'] = grid_kl_counts.get(3, 0)
-            extract_point.loc[extract_point['wilayah'] == wilayah, 'total_kg_4'] = grid_kl_counts.get(4, 0)
+    # Operasi grid_kg_counts_total berfungsi untuk mengisi kolom total_kg_1 sampai total_kg_4 berdasarkan nilai jumlah kelas 
+    grid_kg_counts_total = extract_point['grid_kg'].value_counts().to_dict()
+    extract_point['total_kg_1'] = grid_kg_counts_total.get(1, 0)
+    extract_point['total_kg_2'] = grid_kg_counts_total.get(2, 0)
+    extract_point['total_kg_3'] = grid_kg_counts_total.get(3, 0)
+    extract_point['total_kg_4'] = grid_kg_counts_total.get(4, 0)
 
     # Output Pulau
     # kelas_kl_* diperoleh berdasarkan kumpulan grid_kl per kode_pulau

@@ -1,17 +1,18 @@
-from rasterio.transform import from_origin
-from datetime import datetime as dt
-from scipy.spatial import cKDTree
-from dotenv import load_dotenv
-import geopandas as gpd
-import netCDF4 as nc
-import pandas as pd
-import numpy as np
-import rasterio
-import requests
-import datetime
-import ftplib
-import cftime
 import os
+import cftime
+import ftplib
+import datetime
+import requests
+import rasterio
+import numpy as np
+import pandas as pd
+import netCDF4 as nc
+import geopandas as gpd
+
+from dotenv import load_dotenv
+from scipy.spatial import cKDTree
+from datetime import datetime as dt
+from rasterio.transform import from_origin
 
 load_dotenv()
 os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
@@ -19,13 +20,13 @@ os.environ["PROJ_LIB"] = "C:/Users/2ndba/anaconda3/Library/share/proj"
 geoserver_endpoint = os.getenv("GEOSERVER_ENDPOINT")
 workspace = os.getenv("WORKSPACE")
 
-output_extracted_point_island_folder = "repository/output/daily/result/pulau"
-output_extracted_point_balai_folder = "repository/output/daily/result/balai"
-boundry_island_data = "repository/input/data_vektor/pch_pulau.geojson"
-boundry_balai_data = "repository//input/data_vektor/pch_balai.geojson"
+output_extracted_point_island_folder = "repository/output/hours/result/pulau"
+output_extracted_point_balai_folder = "repository/output/hours/result/balai"
+sampel_island_data = "repository/input/data_vektor/pch_pulau.geojson"
+sampel_balai_data = "repository//input/data_vektor/pch_balai.geojson"
 download_precipitation_path_raster = "repository/input/data_raster"
-output_csv_to_idw = "repository/output/daily/csv_to_idw"
-output_nc_to_csv = "repository/output/daily/nc_to_csv"
+output_csv_to_idw = "repository/output/hours/csv_to_idw"
+output_nc_to_csv = "repository/output/hours/nc_to_csv"
 
 # konfigurasi ftp
 ftp_host = os.getenv("HOST")
@@ -54,7 +55,7 @@ def download_file_from_ftp(ftp, filename):
                 print(f"File {filename} sudah tersedia")
             return local_file_path
     except Exception:
-        print("File rusak, tidak ada yang bisa dilakukan...")
+        print("File rusak, tidak ada yang bisa dilakukan")
         return None
 
 def download_latest_file_from_ftp(ftp):
@@ -65,7 +66,7 @@ def download_latest_file_from_ftp(ftp):
     return None
 
 # Download file .nc
-today = datetime.date.today() - datetime.timedelta(days=2)
+today = datetime.date.today() - datetime.timedelta(days=1)
 filename = f"ECMWF.0125.{today.strftime('%Y%m%d')}{cycle}00.PREC.nc"
 print("Sedang mengunduh:", filename)
 
@@ -93,8 +94,28 @@ def convert_time(times, time_units, time_calendar):
         time_converted_utc.append(time_value)
     return pd.to_datetime(time_converted_utc).tz_localize('UTC')
 
-# Akumulasi curah hujan harian
+# Interval 3 jam => 04.00, 07.00, 10.00, 13.00, 16.00, 19.00, 22.00, 01.00
+def three_hour_intervals(times):
+    target_hours = [4, 7, 10, 13, 16, 19, 22, 1]
+    adjested_times = []
+
+    for time in times:
+        hour_diff = [(abs((time.hour - h) % 24), h) for h in target_hours]
+        closest_hour = min(hour_diff, key=lambda x: x[0])[1]
+
+        if closest_hour == 1 and time.hour > 22:
+            new_time = time + pd.Timedelta(days=1)
+            new_time = new_time.replace(hour=closest_hour, minute=0, second=0, microsecond=0)
+        else:
+            new_time = time.replace(hour=closest_hour, minute=0, second=0, microsecond=0)
+
+        adjested_times.append(new_time)
+
+    return adjested_times
+
+# Akumulasi curah hujan per 3 jam
 def process_netcdf(local_file_path):
+    print(f"Sedang membaca data {filename}")
     dataset = nc.Dataset(local_file_path)
 
     latitudes = dataset.variables['lat'][:]
@@ -106,7 +127,7 @@ def process_netcdf(local_file_path):
     time_calendar = dataset.variables['time'].calendar if hasattr(dataset.variables['time'], 'calendar') else 'standard'
     
     time_converted_utc = convert_time(times, time_units, time_calendar)
-    time_converted_3hr = time_converted_utc.round('3H')
+    time_converted_3hr = three_hour_intervals(time_converted_utc)
 
     data = []
     for time_index, time_value in enumerate(time_converted_3hr):
@@ -120,35 +141,26 @@ def process_netcdf(local_file_path):
     df['Year'] = df['time'].dt.year
     df['Month'] = df['time'].dt.month
     df['Day'] = df['time'].dt.day
+    df['Hour'] = df['time'].dt.hour
 
-    # batasnya sampai harian
-    df_daily = df.groupby(['Year', 'Month', 'Day', 'x', 'y'], as_index=False).agg({
-            'time': 'first',
-            'z': 'sum'        
-        })
-    
-    # cek tanggal minimal dan maksimal data .nc yang sedang diproses
-    min_date = df_daily['time'].min()
-    max_date = df_daily['time'].max()
+    df_accumulated = df.groupby(['Year', 'Month', 'Day', 'Hour', 'x', 'y'], as_index=False).agg({'time': 'first', 'z': 'sum'})
 
-    print(f"Data range: {min_date} to {max_date}")
-
-    return df_daily
+    return df_accumulated
 
 # Ubah data nc menjadi csv, untuk dilanjutkan interpolasi IDW 
-def save_to_csv(df_daily, output_nc_to_csv):
-    unique_times = df_daily['time'].unique()
+def save_to_csv(df_accumulated, output_nc_to_csv):
+    unique_times = df_accumulated['time'].unique()
 
     for unique_time in unique_times:
-        filtered_df = df_daily[df_daily['time'] == unique_time].copy()
+        filtered_df = df_accumulated[df_accumulated['time'] == unique_time].copy()
         filtered_df['time'] = filtered_df['time'].dt.tz_localize(None)
 
         # Save as CSV
         time_str = unique_time.strftime('%m%d%Y_%H%M')
-        output_file = f"{output_nc_to_csv}/pch_day_{time_str}.csv"
+        output_file = f"{output_nc_to_csv}/pch_hour_{time_str}.csv"
         
         filtered_df[['y', 'x', 'time', 'z']].to_csv(output_file, index=False)
-        print(f"Data berhasil disimpan di {output_file}")
+        print(f"Berhasil konversi nc untuk data tanggal {time_str}")
         
     return unique_times
 
@@ -170,30 +182,26 @@ def upload_to_geoserver(data_path, store_name):
     elif file_extension == ".tif":
         file_type = "geotiff"
         store_type = "coveragestores"
-    else:
-        print("Tipe file tidak didukung")
-        return None
     
     absolute_path = os.path.abspath(data_path).replace("\\", "/")
     url = f"{geoserver_endpoint}/rest/workspaces/{workspace}/{store_type}/{store_name}/external.{file_type}"
-    print("url data geotiff:", url)
 
     headers = {"Content-type": "text/plain"}
     response = requests.put(url, data=f"file://{absolute_path}", headers=headers)
 
     if response.status_code in [200, 201]:
-        print(f"Berhasil upload {data_path} ke geoserver.")
+        print(f"Berhasil upload {data_path} ke geoserver")
         return True
     else:
         print(f"Gagal upload {data_path} ke geoserver. Status code: {response.status_code}")
         return False
 
 # Melakukan interpolasi, kemudian simpan hasil dengan format .tif
-def interpolate_and_save_to_tiff(df_daily, output_csv_to_idw, geoserver_endpoint, workspace):
-    unique_times = df_daily['time'].unique()
+def interpolate_and_save_to_tiff(df_accumulated, output_csv_to_idw):
+    unique_times = df_accumulated['time'].unique()
 
     for unique_time in unique_times:
-        filtered_df = df_daily[df_daily['time'] == unique_time].copy()
+        filtered_df = df_accumulated[df_accumulated['time'] == unique_time].copy()
         x = filtered_df['x'].values
         y = filtered_df['y'].values
         z = filtered_df['z'].values
@@ -206,7 +214,7 @@ def interpolate_and_save_to_tiff(df_daily, output_csv_to_idw, geoserver_endpoint
         grid_z = idw_interpolation(x, y, z, grid_x, grid_y)
 
         time_str = unique_time.strftime('%m%d%Y_%H%M')
-        output_tiff = f"{output_csv_to_idw}/pch_day_{time_str}.tif"
+        output_tiff = f"{output_csv_to_idw}/pch_hour_{time_str}.tif"
         transformasi = from_origin(xmin, ymax, res, res)
 
         crs = rasterio.crs.CRS.from_proj4("+proj=longlat +datum=WGS84 +no_defs")
@@ -214,20 +222,16 @@ def interpolate_and_save_to_tiff(df_daily, output_csv_to_idw, geoserver_endpoint
                            count=1, dtype=grid_z.dtype, crs=crs, transform=transformasi) as dst:
             dst.write(grid_z, 1)
 
-        print(f"Hasil interpolasi disimpan di {output_tiff}")
+        print(f"Berhasil melakukan interpolasi untuk data tanggal {time_str}")
 
         # Upload to GeoServer
         store_name = os.path.splitext(os.path.basename(output_tiff))[0]
-        print("store name", store_name)
-        if upload_to_geoserver(output_tiff, store_name):
-            print(f"File .tif berhasil diunggah ke GeoServer: {output_tiff}")
-        else:
-            print(f"Gagal mengunggah file .tif: {output_tiff}")
+        upload_to_geoserver(output_tiff, store_name)
 
 # melakukan ekstrak data raster berdasarkan titik sampel
 def process_extraction(boundary_data, raster_file, output_folder, prefix):
     extract_point = gpd.read_file(boundary_data)
-    print(f"Memproses file: {boundary_data} dengan raster: {raster_file}")
+    print(f"Melakukan ekstrak data raster {raster_file}")
 
     with rasterio.open(raster_file) as src:
         raster_data = src.read(1)
@@ -247,15 +251,15 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
     # Klasifikasi curah hujan dan kesiapsiagaan bencana
     # classify_grid_kl adalah klasifikasi curah hujan
     def classify_grid_kl(val):
-        if 0.00 <= val < 1.12:
+        if 0.00 <= val < 1.12: #ringan
             return 1
-        elif 1.12 <= val < 2.81:
+        elif 1.12 <= val < 2.81: #sedang
             return 2
-        elif 2.81 <= val < 5.62:
+        elif 2.81 <= val < 5.62: # lebat
             return 3
-        elif 5.62 <= val < 8.43:
+        elif 5.62 <= val < 8.43: # sangat lebat
             return 4
-        elif 8.43 <= val:
+        elif 8.43 <= val: # ekstrem
             return 5
         else:
             return 1
@@ -358,17 +362,18 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
         # Hapus kolom grid_kl dan grid_kg, karena sudah tidak digunakan lagi untuk pedoman perhitungan
         extract_point = extract_point.drop(columns=['grid_kl', 'grid_kg'])
 
+    extract_point['last_data'] = filename
+    current_time = dt.now().strftime('%Y-%m-%d %H:%M:%S')
+    extract_point['last_updt'] = current_time
+
     # Simpan ke shapefile
     output_file = os.path.join(output_folder, f"{prefix}_{os.path.basename(raster_file).replace('.tif', '.shp')}")
     extract_point.to_file(output_file, driver="ESRI Shapefile")
-    print(f"Berhasil ekstrak data raster {output_file}")
+    print(f"Berhasil ekstrak data {output_file}")
 
     # Upload ke GeoServer
     store_name = os.path.splitext(os.path.basename(output_file))[0]
-    if upload_to_geoserver(output_file, store_name):
-        print(f"File berhasil diunggah ke GeoServer: {output_file}")
-    else:
-        print(f"Gagal mengunggah file: {output_file}")
+    upload_to_geoserver(output_file, store_name)
 
 
 # Looping data .tif pada folder
@@ -377,28 +382,26 @@ for tif_file in os.listdir(output_csv_to_idw):
         raster_path = os.path.join(output_csv_to_idw, tif_file)
 
         # Proses data pulau
-        process_extraction(boundry_island_data, raster_path, output_extracted_point_island_folder, "pulau")
+        process_extraction(sampel_island_data, raster_path, output_extracted_point_island_folder, "pulau")
         
         # Proses data balai
-        process_extraction(boundry_balai_data, raster_path, output_extracted_point_balai_folder, "balai")
+        process_extraction(sampel_balai_data, raster_path, output_extracted_point_balai_folder, "balai")
 
 def process_netcdf_and_interpolate_with_extraction(
     local_file_path, 
     output_nc_to_csv, 
     output_csv_to_idw, 
-    geoserver_endpoint, 
-    workspace, 
-    boundry_island_data, 
-    boundry_balai_data, 
+    sampel_island_data, 
+    sampel_balai_data, 
     output_extracted_point_island_folder, 
     output_extracted_point_balai_folder
 ):
     # Langkah 1: Proses NetCDF dan Simpan CSV
-    df_daily = process_netcdf(local_file_path)
-    save_to_csv(df_daily, output_nc_to_csv)
+    df_accumulated = process_netcdf(local_file_path)
+    save_to_csv(df_accumulated, output_nc_to_csv)
     
     # Langkah 2: Interpolasi dan Simpan GeoTIFF
-    interpolate_and_save_to_tiff(df_daily, output_csv_to_idw, geoserver_endpoint, workspace)
+    interpolate_and_save_to_tiff(df_accumulated, output_csv_to_idw)
     
     # Langkah 3: Ekstraksi Data Raster untuk Setiap File GeoTIFF
     for tif_file in os.listdir(output_csv_to_idw):
@@ -406,19 +409,17 @@ def process_netcdf_and_interpolate_with_extraction(
             raster_path = os.path.join(output_csv_to_idw, tif_file)
             
             # Proses data pulau
-            process_extraction(boundry_island_data, raster_path, output_extracted_point_island_folder, "pulau")
+            process_extraction(sampel_island_data, raster_path, output_extracted_point_island_folder, "pulau")
             
             # Proses data balai
-            process_extraction(boundry_balai_data, raster_path, output_extracted_point_balai_folder, "balai")
+            process_extraction(sampel_balai_data, raster_path, output_extracted_point_balai_folder, "balai")
 
 process_netcdf_and_interpolate_with_extraction(
     local_file_path, 
     output_nc_to_csv, 
-    output_csv_to_idw, 
-    geoserver_endpoint, 
-    workspace, 
-    boundry_island_data, 
-    boundry_balai_data, 
+    output_csv_to_idw,  
+    sampel_island_data, 
+    sampel_balai_data, 
     output_extracted_point_island_folder, 
     output_extracted_point_balai_folder
 )
