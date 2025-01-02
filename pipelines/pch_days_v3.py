@@ -258,7 +258,7 @@ def interpolate_and_save_to_tiff(df_daily_prediction, output_csv_to_idw, mask_pu
         })
 
         # Simpan hasil masking
-        result_masked = f"{output_masked}/masked_pch_day_{time_str}.tif"
+        result_masked = f"{output_masked}/pch_day_{time_str}.tif"
         with rasterio.open(result_masked, "w", **out_meta) as dest:
             dest.write(out_image)
 
@@ -349,28 +349,28 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
 
     # Output Pulau
     # kelas_kl_* diperoleh berdasarkan kumpulan grid_kl per kode_pulau
-    if 'kode_pulau' in extract_point.columns:
-        grouped_pulau = extract_point.groupby('kode_pulau')
-        for kode_pulau, group in grouped_pulau:
+    if {'kode_wil', 'kode_pulau'}.issubset(extract_point.columns):
+        grouped_pulau = extract_point.groupby(['kode_wil','kode_pulau'])
+        for (kode_wil, kode_pulau), group in grouped_pulau:
             grid_kl_counts = group['grid_kl'].value_counts().to_dict()
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_1'] = grid_kl_counts.get(1, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_2'] = grid_kl_counts.get(2, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_3'] = grid_kl_counts.get(3, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_4'] = grid_kl_counts.get(4, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kl_5'] = grid_kl_counts.get(5, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kl_1'] = grid_kl_counts.get(1, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kl_2'] = grid_kl_counts.get(2, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kl_3'] = grid_kl_counts.get(3, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kl_4'] = grid_kl_counts.get(4, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kl_5'] = grid_kl_counts.get(5, 0)
 
     # kelas_kg_* diperoleh berdasarkan kumpulan grid_kg per kode_pulau
-    if 'kode_pulau' in extract_point.columns:
-        grouped_pulau = extract_point.groupby('kode_pulau')
-        for kode_pulau, group in grouped_pulau:
-            grid_kl_counts = group['grid_kg'].value_counts().to_dict()
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_1'] = grid_kl_counts.get(1, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_2'] = grid_kl_counts.get(2, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_3'] = grid_kl_counts.get(3, 0)
-            extract_point.loc[extract_point['kode_pulau'] == kode_pulau, 'kelas_kg_4'] = grid_kl_counts.get(4, 0)
+    if {'kode_wil', 'kode_pulau'}.issubset(extract_point.columns):
+        grouped_pulau = extract_point.groupby(['kode_wil','kode_pulau'])
+        for (kode_wil, kode_pulau), group in grouped_pulau:
+            grid_kg_counts = group['grid_kg'].value_counts().to_dict()
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kg_1'] = grid_kg_counts.get(1, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kg_2'] = grid_kg_counts.get(2, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kg_3'] = grid_kg_counts.get(3, 0)
+            extract_point.loc[(extract_point['kode_wil'] == kode_wil) & (extract_point['kode_pulau'] == kode_pulau), 'kelas_kg_4'] = grid_kg_counts.get(4, 0)
 
         # tampilkan nilai tertinggi saja berdasarkan value, karena acuannya menggunakan nilai tertinggi pada masing-masing pulau
-        extract_point = extract_point.loc[extract_point.groupby('kode_pulau')['value'].idxmax()]
+        extract_point = extract_point.loc[extract_point.groupby(['kode_wil', 'kode_pulau'])['value'].idxmax()]
         # Hapus kolom grid_kl dan grid_kg, karena sudah tidak digunakan lagi untuk pedoman perhitungan
         extract_point = extract_point.drop(columns=['grid_kl', 'grid_kg'])
 
@@ -384,7 +384,7 @@ def process_extraction(boundary_data, raster_file, output_folder, prefix):
             extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_2'] = grid_kg_counts.get(2, 0)
             extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_3'] = grid_kg_counts.get(3, 0)
             extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_4'] = grid_kg_counts.get(4, 0)
-            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_5'] = grid_kg_counts.get(4, 0)
+            extract_point.loc[extract_point['kode_balai'] == kode_balai, 'kelas_kl_5'] = grid_kg_counts.get(5, 0)
 
     # kelas_kg_* diperoleh berdasarkan kumpulan grid_kg per kode_balai
     if 'kode_balai' in extract_point.columns:
